@@ -234,10 +234,12 @@ function generateStringFromNode(element: Element): string | undefined {
 }
 
 function countUnread(mutationsList: MutationRecord[]): void {
-	const alreadyChecked: string[] = [];
+	const alreadyChecked = new Set<string>();
 
-	// Check latest mutation first
-	for (const mutation of mutationsList.reverse()) {
+	// Check latest mutation first. Iterate backwards rather than reversing the
+	// observer's array in place — the records are owned by the observer.
+	for (let index = mutationsList.length - 1; index >= 0; index--) {
+		const mutation = mutationsList[index];
 		// Find the conversation row containing this mutation.
 		// For childList mutations the target is the parent element; for others it's the
 		// element/text node itself, so go up one level first.
@@ -280,7 +282,7 @@ function countUnread(mutationsList: MutationRecord[]): void {
 		}
 
 		// Deduplicate: only process each conversation once per batch of mutations.
-		if (alreadyChecked.includes(href)) {
+		if (alreadyChecked.has(href)) {
 			continue;
 		}
 
@@ -295,7 +297,7 @@ function countUnread(mutationsList: MutationRecord[]): void {
 			continue;
 		}
 
-		alreadyChecked.push(href);
+		alreadyChecked.add(href);
 
 		// Get the icon data URI (set by createConversationList via createIcons).
 		const imgUrl = current.querySelector('img')?.dataset.caprineIcon ?? '';

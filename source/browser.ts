@@ -1133,7 +1133,7 @@ function filenameFromMimeType(mimeType: string): string {
 	return extension[base] ?? 'download';
 }
 
-function handleLinkClick(event: MouseEvent, target: HTMLElement): boolean {
+function handleLinkClick(event: MouseEvent, target: Element): boolean {
 	const link = target.closest<HTMLAnchorElement>('a[href]');
 	if (!link) {
 		return false;
@@ -1225,24 +1225,31 @@ function isInternalUrl(url: URL): boolean {
 }
 
 document.addEventListener('click', (event: MouseEvent) => {
-	const target = event.target as HTMLElement;
+	const {target} = event;
 
-	const currentUrl = new URL(window.location.href);
-	const isFacebookDomain = currentUrl.hostname.endsWith('.facebook.com') || currentUrl.hostname === 'www.facebook.com' || currentUrl.hostname === 'web.facebook.com';
-	const isMessagesPage = isFacebookDomain && currentUrl.pathname.startsWith('/messages');
-	const isLoginPage = isFacebookDomain && (
-		currentUrl.pathname.startsWith('/login')
-		|| currentUrl.pathname.startsWith('/checkpoint')
-		|| currentUrl.pathname.startsWith('/two_step_verification')
-		|| currentUrl.pathname.startsWith('/two_factor')
-		|| currentUrl.pathname === '/'
-	);
-
-	if (!isMessagesPage && !isLoginPage) {
+	// Cheap rejections first: a non-element target (or an image) can never be
+	// an outbound link, and this keeps them off the path below.
+	if (!(target instanceof Element) || target.tagName === 'IMG') {
 		return;
 	}
 
-	if (target.tagName === 'IMG') {
+	// Read the `location` fields directly instead of parsing
+	// `new URL(location.href)` on every click. `endsWith` already covers
+	// `www.` and `web.facebook.com`.
+	const {hostname, pathname} = window.location;
+
+	if (!hostname.endsWith('.facebook.com')) {
+		return;
+	}
+
+	const isMessagesPage = pathname.startsWith('/messages');
+	const isLoginPage = pathname.startsWith('/login')
+		|| pathname.startsWith('/checkpoint')
+		|| pathname.startsWith('/two_step_verification')
+		|| pathname.startsWith('/two_factor')
+		|| pathname === '/';
+
+	if (!isMessagesPage && !isLoginPage) {
 		return;
 	}
 
