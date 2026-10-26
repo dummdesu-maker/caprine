@@ -20,7 +20,7 @@ const source = await readFile(sourcePath, 'utf8');
 const ast = parse(source, {ecmaVersion: 'latest', sourceType: 'script'});
 
 const wantedVariables = new Set(['icon', 'iconCache', 'MAX_CACHED_ICONS', 'listScheduled', 'listRunning', 'listDirty']);
-const wantedFunctions = new Set(['getIcons', 'createIcons', 'scheduleConversationList', 'runConversationList']);
+const wantedFunctions = new Set(['getIcons', 'createIcons', 'getIcon', 'getLabel', 'scheduleConversationList', 'runConversationList']);
 
 let extracted = '';
 const found = new Set();
@@ -95,6 +95,8 @@ const createInstance = () => new Function('document', `
 	return {
 		getIcons,
 		createIcons,
+		getIcon,
+		getLabel,
 		iconCache,
 		MAX_CACHED_ICONS,
 		scheduleConversationList,
@@ -166,6 +168,44 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 	ok('cache: stays bounded', mod.iconCache.size === mod.MAX_CACHED_ICONS, `size=${mod.iconCache.size}`);
 	ok('cache: evicts oldest first', !mod.iconCache.has('https://cdn/0.png'));
 	ok('cache: keeps newest', mod.iconCache.has('https://cdn/204.png'));
+}
+
+// --- getIcon edge cases -------------------------------------------------
+{
+	const mod = createInstance();
+	ok('getIcon: missing element yields empty string', await mod.getIcon(undefined, false) === '');
+}
+
+{
+	// Lazy-loaded avatars: no `src` yet. Must not cache a placeholder.
+	const mod = createInstance();
+	const element = document.createElement('img');
+	const result = await mod.getIcon(element, false);
+
+	ok('getIcon: no src yields empty string', result === '');
+	ok('getIcon: no src caches nothing', !element.getAttribute('data-caprine-icon'));
+	ok('getIcon: no src renders nothing', mod.state.urlCalls === 0, `urlCalls=${mod.state.urlCalls}`);
+
+	// ...and once Facebook fills in `src`, the next scan renders it.
+	element.setAttribute('src', 'https://cdn/a.png');
+	const later = await mod.getIcon(element, false);
+	ok('getIcon: renders once src appears', later.startsWith('data:image/png'), later.slice(0, 24));
+	ok('getIcon: renders after src appears', mod.state.urlCalls === 1, `urlCalls=${mod.state.urlCalls}`);
+}
+
+// --- getLabel must not mutate the live row ------------------------------
+{
+	const mod = createInstance();
+	const labelElement = document.createElement('span');
+	const emojiImage = document.createElement('img');
+	emojiImage.setAttribute('alt', '👍');
+	labelElement.append(emojiImage);
+
+	const before = labelElement.innerHTML;
+	const label = await mod.getLabel(labelElement);
+
+	ok('getLabel: extracts emoji from alt', label === '👍', label);
+	ok('getLabel: leaves the live DOM untouched', labelElement.innerHTML === before, labelElement.innerHTML);
 }
 
 // --- scan coalescing ----------------------------------------------------
