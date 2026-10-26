@@ -905,20 +905,60 @@ async function observeThemeBugs(): Promise<void> {
 // Listen for emoji element dom insertion
 document.addEventListener('animationstart', insertionListener, false);
 
-// Inject a CSS class on the messenger layout container to enable proper styling
-function injectMessengerLayoutClass(): void {
-	const threadListNavigation = document.querySelector('[role="navigation"]:has([role="grid"])');
-	threadListNavigation?.parentElement?.classList.add('caprine-thread-list-container');
+const threadListSelector = '[role="navigation"]:has([role="grid"])';
+const threadListContainerClass = 'caprine-thread-list-container';
+
+// Without a candidate container the selector below has to be re-run to find
+// one. Back off so a page with no thread list (login, error) does not pay for
+// a document-wide `:has()` query on every mutation batch.
+const LAYOUT_SEARCH_BACKOFF_MS = 500;
+
+let taggedThreadListContainer: HTMLElement | undefined;
+let lastThreadListSearchAt = 0;
+
+// Tag the thread list container so the stylesheet can pad it.
+function applyThreadListLayoutClass(): void {
+	// Fast path: the node we tagged is still attached and still carries the
+	// class. This is what keeps the observer below from running a document-wide
+	// `:has()` query on every DOM mutation on the page.
+	if (
+		taggedThreadListContainer?.isConnected
+		&& taggedThreadListContainer.classList.contains(threadListContainerClass)
+	) {
+		return;
+	}
+
+	if (taggedThreadListContainer === undefined) {
+		const now = Date.now();
+
+		if (now - lastThreadListSearchAt < LAYOUT_SEARCH_BACKOFF_MS) {
+			return;
+		}
+
+		lastThreadListSearchAt = now;
+	}
+
+	// Slow path: Facebook rebuilt the container, stripped the class, or the tag
+	// has not been applied yet.
+	taggedThreadListContainer = document.querySelector<HTMLElement>(threadListSelector)?.parentElement ?? undefined;
+	taggedThreadListContainer?.classList.add(threadListContainerClass);
 }
 
-// Observe for navigation changes and re-inject the class when needed
+// Re-apply the tag when Facebook rebuilds the layout.
 function observeMessengerLayout(): void {
+	let scheduled = false;
+
 	const observer = new MutationObserver(() => {
-		// Check if the class is missing but the navigation exists
-		const threadListNavigation = document.querySelector('[role="navigation"]:has([role="grid"])');
-		if (threadListNavigation?.parentElement && !threadListNavigation.parentElement.classList.contains('caprine-thread-list-container')) {
-			threadListNavigation.parentElement.classList.add('caprine-thread-list-container');
+		if (scheduled) {
+			return;
 		}
+
+		scheduled = true;
+
+		requestAnimationFrame(() => {
+			scheduled = false;
+			applyThreadListLayoutClass();
+		});
 	});
 
 	observer.observe(document.body, {childList: true, subtree: true});
@@ -930,8 +970,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 	style.id = 'zoomFactor';
 	document.body.append(style);
 
-	// Inject messenger layout class for proper padding and spacing
-	injectMessengerLayoutClass();
+	// Tag the messenger layout container for proper padding and spacing
+	applyThreadListLayoutClass();
 	observeMessengerLayout();
 
 	// Set the zoom factor if it was set before quitting
