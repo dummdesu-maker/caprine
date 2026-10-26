@@ -7,7 +7,6 @@ import {
 	Menu,
 } from 'electron';
 import {is} from 'electron-util';
-import {memoize} from 'lodash';
 import {showRestartDialog, getWindow, sendBackgroundAction} from './util';
 import config from './config';
 
@@ -233,10 +232,31 @@ function codeForEmojiStyle(style: EmojiStyle): EmojiStyleCode {
 	}
 }
 
+/** Cache of rendered emoji, so each one costs a single renderer round-trip. */
+const emojiCache = new Map<string, Promise<string>>();
+
 /**
 Renders the given emoji in the renderer process and returns a PNG `data:` URL.
 */
-const renderEmoji = memoize(async (emoji: string): Promise<string> => sendBackgroundAction<string, string>('render-native-emoji', emoji));
+async function renderEmoji(emoji: string): Promise<string> {
+	const cached = emojiCache.get(emoji);
+
+	if (cached) {
+		return cached;
+	}
+
+	const pending = sendBackgroundAction<string, string>('render-native-emoji', emoji);
+	emojiCache.set(emoji, pending);
+
+	try {
+		return await pending;
+	} catch (error) {
+		// Don't cache a failed render, otherwise a transient IPC failure would
+		// break that emoji for the rest of the session.
+		emojiCache.delete(emoji);
+		throw error;
+	}
+}
 
 /**
 @param url - A Facebook emoji URL like `https://static.xx.fbcdn.net/images/emoji.php/v9/tae/2/16/1f471_1f3fb_200d_2640.png`.

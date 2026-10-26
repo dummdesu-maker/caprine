@@ -47,15 +47,12 @@
 		"facebook-locales": "^1.0.916",
 		"is-online": "^9.0.1",
 		"json-schema-typed": "^8.0.1",
-		"lodash": "^4.17.21",
-		"npm-check-updates": "^16.14.15",
 		"p-wait-for": "^3.2.0"
 	},
 	"devDependencies": {
 		"@sindresorhus/tsconfig": "^0.7.0",
 		"@types/electron-localshortcut": "^3.1.3",
 		"@types/facebook-locales": "^1.0.2",
-		"@types/lodash": "^4.14.202",
 		"del-cli": "^5.1.0",
 		"electron": "43.7.3",
 		"electron-builder": "^24.12.0",
