@@ -26,6 +26,7 @@ import {bestFacebookLocaleFor} from 'facebook-locales';
 import doNotDisturb from '@sindresorhus/do-not-disturb';
 import updateAppMenu from './menu';
 import config, {StoreType} from './config';
+import {configFlags} from './config-flags';
 import tray from './tray';
 import {
 	sendAction,
@@ -173,12 +174,12 @@ async function updateBadge(messageCount: number): Promise<void> {
 	}
 
 	if (!is.windows) {
-		app.badgeCount = (config.get('showUnreadBadge') && !isDNDEnabled) ? messageCount : 0;
+		app.badgeCount = (configFlags.showUnreadBadge && !isDNDEnabled) ? messageCount : 0;
 
 		if (
 			is.macos
 			&& !isDNDEnabled
-			&& config.get('bounceDockOnMessage')
+			&& configFlags.bounceDockOnMessage
 			&& previousMessageCount !== messageCount
 		) {
 			app.dock?.bounce('informational');
@@ -186,9 +187,9 @@ async function updateBadge(messageCount: number): Promise<void> {
 	}
 
 	if (!is.macos) {
-		tray.setBadge(config.get('showUnreadBadge') ? messageCount > 0 : false);
+		tray.setBadge(configFlags.showUnreadBadge ? messageCount > 0 : false);
 
-		if (config.get('flashWindowOnMessage')) {
+		if (configFlags.flashWindowOnMessage) {
 			// Only flash when there are new unread messages (count increased from previous)
 			// This prevents repeated flashing from DOM mutations without new messages
 			const hasNewMessages = messageCount > previousMessageCount;
@@ -205,7 +206,7 @@ async function updateBadge(messageCount: number): Promise<void> {
 	tray.update(messageCount);
 
 	if (is.windows) {
-		if (!config.get('showUnreadBadge') || messageCount === 0) {
+		if (!configFlags.showUnreadBadge || messageCount === 0) {
 			mainWindow.setOverlayIcon(null, '');
 		} else {
 			// Delegate drawing of overlay icon to renderer process
@@ -293,18 +294,18 @@ function initRequestsFiltering(): void {
 		if (url.includes('emoji.php')) {
 			callback(await processEmojiUrl(url));
 		} else if (url.includes('typ.php')) {
-			callback({cancel: config.get('block.typingIndicator' as any)});
+			callback({cancel: configFlags.typingIndicator});
 		} else if (url.includes('change_read_status.php')) {
-			callback({cancel: config.get('block.chatSeen' as any)});
+			callback({cancel: configFlags.chatSeen});
 		} else if (url.includes('delivery_receipts') || url.includes('unread_threads')) {
-			callback({cancel: config.get('block.deliveryReceipt' as any)});
+			callback({cancel: configFlags.deliveryReceipt});
 		}
 	});
 
 	session.defaultSession.webRequest.onHeadersReceived({
 		urls: ['*://static.xx.fbcdn.net/rsrc.php/*'],
 	}, ({responseHeaders}, callback) => {
-		if (!config.get('callRingtoneMuted') || !responseHeaders) {
+		if (!configFlags.callRingtoneMuted || !responseHeaders) {
 			callback({});
 			return;
 		}
@@ -455,7 +456,7 @@ function createMainWindow(): BrowserWindow {
 	});
 
 	win.on('focus', () => {
-		if (config.get('flashWindowOnMessage')) {
+		if (configFlags.flashWindowOnMessage) {
 			// This is a security in the case where messageCount is not reset by page title update
 			win.flashFrame(false);
 		}
@@ -972,7 +973,7 @@ ipc.answerRenderer(
 		notification.show();
 
 		// Request window attention on Linux (Wayland-compatible)
-		if (is.linux && config.get('flashWindowOnMessage')) {
+		if (is.linux && configFlags.flashWindowOnMessage) {
 			mainWindow.flashFrame(true);
 			setTimeout(() => {
 				mainWindow.flashFrame(false);

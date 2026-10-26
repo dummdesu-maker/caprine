@@ -17,6 +17,12 @@ import {
 	debugInfo,
 } from 'electron-util';
 import config from './config';
+import {
+	configFlags,
+	refreshConfigFlags,
+	setBlockFlag,
+	setConfigFlag,
+} from './config-flags';
 import getSpellCheckerLanguages from './spell-checker';
 import {
 	sendAction,
@@ -30,6 +36,11 @@ import {toggleMenuBarMode} from './menu-bar-mode';
 import {caprineIconPath} from './constants';
 
 export default async function updateMenu(): Promise<Menu> {
+	// The menu is rebuilt on startup, on every page load, and after each setting
+	// change, which makes this the natural point to re-sync the hot-path mirror
+	// with the store (it also picks up hand-edited config changes on reload).
+	refreshConfigFlags();
+
 	const newConversationItem: MenuItemConstructorOptions = {
 		label: 'New Conversation',
 		accelerator: 'CommandOrControl+N',
@@ -190,25 +201,25 @@ export default async function updateMenu(): Promise<Menu> {
 		{
 			label: 'Block Seen Indicator',
 			type: 'checkbox',
-			checked: config.get('block.chatSeen' as any),
+			checked: configFlags.chatSeen,
 			click(menuItem) {
-				config.set('block.chatSeen' as any, menuItem.checked);
+				setBlockFlag('chatSeen', menuItem.checked);
 			},
 		},
 		{
 			label: 'Block Typing Indicator',
 			type: 'checkbox',
-			checked: config.get('block.typingIndicator' as any),
+			checked: configFlags.typingIndicator,
 			click(menuItem) {
-				config.set('block.typingIndicator' as any, menuItem.checked);
+				setBlockFlag('typingIndicator', menuItem.checked);
 			},
 		},
 		{
 			label: 'Block Delivery Receipts',
 			type: 'checkbox',
-			checked: config.get('block.deliveryReceipt' as any),
+			checked: configFlags.deliveryReceipt,
 			click(menuItem) {
-				config.set('block.deliveryReceipt' as any, menuItem.checked);
+				setBlockFlag('deliveryReceipt', menuItem.checked);
 			},
 		},
 	];
@@ -252,9 +263,9 @@ Press Command/Ctrl+R in Caprine to see your changes.
 			label: 'Bounce Dock on Message',
 			type: 'checkbox',
 			visible: is.macos,
-			checked: config.get('bounceDockOnMessage'),
+			checked: configFlags.bounceDockOnMessage,
 			click() {
-				config.set('bounceDockOnMessage', !config.get('bounceDockOnMessage'));
+				setConfigFlag('bounceDockOnMessage', !configFlags.bounceDockOnMessage);
 			},
 		},
 		{
@@ -291,17 +302,17 @@ Press Command/Ctrl+R in Caprine to see your changes.
 		{
 			label: 'Mute Call Ringtone',
 			type: 'checkbox',
-			checked: config.get('callRingtoneMuted'),
+			checked: configFlags.callRingtoneMuted,
 			click() {
-				config.set('callRingtoneMuted', !config.get('callRingtoneMuted'));
+				setConfigFlag('callRingtoneMuted', !configFlags.callRingtoneMuted);
 			},
 		},
 		{
 			label: 'Show Unread Badge',
 			type: 'checkbox',
-			checked: config.get('showUnreadBadge'),
+			checked: configFlags.showUnreadBadge,
 			click(menuItem) {
-				config.set('showUnreadBadge', menuItem.checked);
+				setConfigFlag('showUnreadBadge', menuItem.checked);
 				// Immediately clear badge if unchecked
 				if (!menuItem.checked) {
 					app.badgeCount = 0;
@@ -424,9 +435,9 @@ Press Command/Ctrl+R in Caprine to see your changes.
 			label: 'Flash Window on Message',
 			type: 'checkbox',
 			visible: is.development,
-			checked: config.get('flashWindowOnMessage'),
+			checked: configFlags.flashWindowOnMessage,
 			click(menuItem) {
-				config.set('flashWindowOnMessage', menuItem.checked);
+				setConfigFlag('flashWindowOnMessage', menuItem.checked);
 			},
 		},
 		{
