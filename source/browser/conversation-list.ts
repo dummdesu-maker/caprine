@@ -60,10 +60,29 @@ async function urlToCanvas(url: string, size: number): Promise<HTMLCanvasElement
 	});
 }
 
-async function createIcons(element: HTMLElement, url: string): Promise<void> {
-	const canvas = await urlToCanvas(url, 50);
+type IconPair = {
+	read: string;
+	unread: string;
+};
 
-	element.setAttribute(icon.read, canvas.toDataURL());
+// Rendering one icon costs an image decode plus two base64 encodes. Cache the
+// result per avatar URL: Facebook recreates row nodes often, but a conversation
+// keeps the same avatar URL, so identical work was being redone each time.
+const iconCache = new Map<string, IconPair>();
+
+// Each entry holds two base64 PNGs, so keep the cache bounded. Map iteration is
+// insertion-ordered, which makes the first key the oldest entry.
+const MAX_CACHED_ICONS = 200;
+
+async function getIcons(url: string): Promise<IconPair> {
+	const cached = iconCache.get(url);
+
+	if (cached) {
+		return cached;
+	}
+
+	const canvas = await urlToCanvas(url, 50);
+	const read = canvas.toDataURL();
 
 	const markerSize = 8;
 	const context = canvas.getContext('2d')!;
@@ -74,7 +93,29 @@ async function createIcons(element: HTMLElement, url: string): Promise<void> {
 	context.closePath();
 	context.fill();
 
-	element.setAttribute(icon.unread, canvas.toDataURL());
+	const icons: IconPair = {
+		read,
+		unread: canvas.toDataURL(),
+	};
+
+	iconCache.set(url, icons);
+
+	if (iconCache.size > MAX_CACHED_ICONS) {
+		const oldestUrl = iconCache.keys().next().value;
+
+		if (oldestUrl !== undefined) {
+			iconCache.delete(oldestUrl);
+		}
+	}
+
+	return icons;
+}
+
+async function createIcons(element: HTMLElement, url: string): Promise<void> {
+	const icons = await getIcons(url);
+
+	element.setAttribute(icon.read, icons.read);
+	element.setAttribute(icon.unread, icons.unread);
 }
 
 async function discoverIcons(element: HTMLElement): Promise<void> {
@@ -213,6 +254,51 @@ async function createConversationList(): Promise<Conversation[]> {
 export async function sendConversationList(): Promise<void> {
 	const conversationsToRender: Conversation[] = await createConversationList();
 	ipc.callMain('conversations', conversationsToRender);
+}
+
+// The observer used to start a fresh async scan for every mutation batch, so
+// scans overlapped and raced: whichever resolved last won, which is not
+// necessarily the one that read the newest DOM. Coalesce bursts into one frame
+// and allow only one scan at a time.
+let listScheduled = false;
+let listRunning = false;
+let listDirty = false;
+
+function scheduleConversationList(): void {
+	if (listScheduled) {
+		return;
+	}
+
+	listScheduled = true;
+
+	requestAnimationFrame(() => {
+		listScheduled = false;
+		void runConversationList();
+	});
+}
+
+async function runConversationList(): Promise<void> {
+	if (listRunning) {
+		// A scan is already in flight; make sure it runs once more afterwards.
+		listDirty = true;
+		return;
+	}
+
+	listRunning = true;
+
+	try {
+		listDirty = false;
+		await sendConversationList();
+	} finally {
+		listRunning = false;
+	}
+
+	// Mutations that landed during the scan get their own scheduled run, so the
+	// final DOM state is never missed.
+	if (listDirty) {
+		listDirty = false;
+		scheduleConversationList();
+	}
 }
 
 function generateStringFromNode(element: Element): string | undefined {
@@ -427,7 +513,7 @@ window.addEventListener('load', async () => {
 	const grid = await elementReady('[role="grid"]', {stopOnDomReady: false});
 
 	if (grid) {
-		const conversationListObserver = new MutationObserver(async () => sendConversationList());
+		const conversationListObserver = new MutationObserver(scheduleConversationList);
 		const conversationCountObserver = new MutationObserver(countUnread);
 		const trayIconObserver = new MutationObserver(updateTrayIcon);
 
