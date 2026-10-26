@@ -118,34 +118,26 @@ async function createIcons(element: HTMLElement, url: string): Promise<void> {
 	element.setAttribute(icon.unread, icons.unread);
 }
 
-async function discoverIcons(element: HTMLElement): Promise<void> {
-	if (element) {
-		return createIcons(element, element.getAttribute('src')!);
-	}
-
-	console.warn('Could not discover profile picture. Falling back to default image.');
-
-	// Fall back to messenger favicon
-	const messengerIcon = document.querySelector('link[rel~="icon"]');
-
-	if (messengerIcon) {
-		return createIcons(element, messengerIcon.getAttribute('href')!);
-	}
-
-	// Fall back to facebook favicon
-	return createIcons(element, 'https://facebook.com/favicon.ico');
-}
-
-async function getIcon(element: HTMLElement, unread: boolean): Promise<string> {
-	if (element === null) {
-		return icon.read;
+async function getIcon(element: HTMLElement | undefined, unread: boolean): Promise<string> {
+	if (!element) {
+		return '';
 	}
 
 	if (!element.getAttribute(icon.read)) {
-		await discoverIcons(element);
+		const url = element.getAttribute('src');
+
+		// Facebook lazy-loads avatars, so `src` can still be missing on the first
+		// scan. Return without setting the attributes: caching a placeholder here
+		// would stick for the rest of the session, whereas bailing out lets a
+		// later scan render the real avatar once `src` appears.
+		if (!url) {
+			return '';
+		}
+
+		await createIcons(element, url);
 	}
 
-	return element.getAttribute(unread ? icon.unread : icon.read)!;
+	return element.getAttribute(unread ? icon.unread : icon.read) ?? '';
 }
 
 async function getLabel(element: HTMLElement | undefined): Promise<string> {
@@ -163,16 +155,17 @@ async function getLabel(element: HTMLElement | undefined): Promise<string> {
 	}
 
 	if (label.trim() === '') {
-		const emojis: HTMLElement[] = [];
-		for (const elementCurrent of element.children) {
-			emojis.push(elementCurrent as HTMLElement);
+		// Emoji-only labels render as <img> elements that carry the emoji in
+		// `alt`. Rewrite a clone: substituting `outerHTML` on the live row would
+		// mutate the conversation list and re-trigger the observer that started
+		// this scan.
+		const clone = element.cloneNode(true) as HTMLElement;
+
+		for (const image of clone.querySelectorAll('img')) {
+			image.replaceWith(image.getAttribute('alt') ?? '');
 		}
 
-		for (const emoji of emojis) {
-			emoji.outerHTML = emoji.querySelector('img')?.getAttribute('alt') ?? '';
-		}
-
-		label = element.textContent ?? '';
+		label = clone.textContent ?? '';
 	}
 
 	return label.trim();
@@ -221,7 +214,7 @@ async function createConversationNewDesign(element: HTMLElement): Promise<Conver
 
 	conversation.label = await getLabel(unparsedLabel);
 
-	const iconElement = element.querySelector<HTMLElement>('img')!;
+	const iconElement = element.querySelector<HTMLElement>('img') ?? undefined;
 	conversation.icon = await getIcon(iconElement, conversation.unread);
 
 	return conversation as Conversation;
