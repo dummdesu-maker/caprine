@@ -367,6 +367,22 @@ function removeThemeClasses(useDarkColors: boolean): void {
 	}
 }
 
+// Same cleanup as `removeThemeClasses()`, but restricted to `root` and its
+// descendants. Used by the mutation observer so that a DOM addition costs a
+// walk of the added subtree instead of a walk of the whole document.
+function removeThemeClassesFrom(root: Element): void {
+	const className = nativeTheme.shouldUseDarkColors ? '__fb-light-mode' : '__fb-dark-mode';
+
+	// `querySelectorAll()` only matches descendants, so check the root itself.
+	if (root.classList.contains(className)) {
+		root.classList.remove(className);
+	}
+
+	for (const element of root.querySelectorAll(`.${className}`)) {
+		element.classList.remove(className);
+	}
+}
+
 async function observeTheme(): Promise<void> {
 	/* Listen for native theme changes (e.g., OS theme change when themeSource is 'system') */
 	nativeTheme.on('updated', setTheme);
@@ -393,6 +409,12 @@ async function observeTheme(): Promise<void> {
 		const nodeRecords = records.filter(record => record.addedNodes.length > 0);
 		for (const nodeRecord of nodeRecords) {
 			for (const newNode of nodeRecord.addedNodes) {
+				// Facebook inserts text nodes directly under these containers, and a
+				// `Text` node has no `classList` — reading it here would throw.
+				if (newNode.nodeType !== Node.ELEMENT_NODE) {
+					continue;
+				}
+
 				const {classList} = (newNode as HTMLElement);
 				const isLight = classList.contains('light-mode') || classList.contains('__fb-light-mode');
 				if (nativeTheme.shouldUseDarkColors === isLight) {
@@ -821,12 +843,59 @@ async function observeAutoscroll(): Promise<void> {
 }
 
 async function observeThemeBugs(): Promise<void> {
-	const rootObserver = new MutationObserver((record: MutationRecord[]) => {
-		const newNodes: MutationRecord[] = record
-			.filter(record => record.addedNodes.length > 0 || record.removedNodes.length > 0);
+	// Facebook re-injects hard-coded theme classes whenever it mounts a new
+	// subtree. This observer sees every DOM change on facebook.com, so it must
+	// not rescan the document per mutation:
+	//   1. only nodes added since the last flush can carry a stale class, so we
+	//      record those and clean just their subtrees;
+	//   2. the work is coalesced into one animation frame, so a burst of
+	//      mutations (a whole conversation re-render) costs a single pass.
+	const MAX_PENDING_ROOTS = 200;
 
-		if (newNodes) {
+	let pendingRoots: Element[] = [];
+	let scheduled = false;
+
+	const flush = (): void => {
+		scheduled = false;
+		const roots = pendingRoots;
+		pendingRoots = [];
+
+		for (const root of roots) {
+			// A node can be detached again before the frame runs.
+			if (root.isConnected) {
+				removeThemeClassesFrom(root);
+			}
+		}
+	};
+
+	const rootObserver = new MutationObserver((records: MutationRecord[]) => {
+		for (const record of records) {
+			for (const node of record.addedNodes) {
+				// Only element nodes can carry a class. Removals are ignored: they
+				// cannot introduce a stale class, and a class change on the root is
+				// already handled by the `observeTheme()` attribute observer.
+				if (node.nodeType === Node.ELEMENT_NODE) {
+					pendingRoots.push(node as Element);
+				}
+			}
+		}
+
+		if (pendingRoots.length === 0) {
+			return;
+		}
+
+		if (pendingRoots.length >= MAX_PENDING_ROOTS) {
+			// `requestAnimationFrame` is suspended while the window is hidden, so
+			// the queue can otherwise grow without bound. Degrade to a single full
+			// sweep and start over.
+			pendingRoots = [];
 			removeThemeClasses(Boolean(nativeTheme.shouldUseDarkColors));
+			return;
+		}
+
+		if (!scheduled) {
+			scheduled = true;
+			requestAnimationFrame(flush);
 		}
 	});
 
